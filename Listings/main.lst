@@ -1,0 +1,310 @@
+C51 COMPILER V9.54   MAIN                                                                  07/12/2025 17:26:44 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Objects\main.obj
+COMPILER INVOKED BY: D:\keil5\C51\BIN\C51.EXE main.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\main.l
+                    -st) OBJECT(.\Objects\main.obj)
+
+line level    source
+
+   1          #include<reg51.h>
+   2          
+   3          // 引脚定义
+   4          sbit P10 = P1^0;
+   5          sbit P11 = P1^1;
+   6          sbit P12 = P1^2;
+   7          sbit P13 = P1^3;
+   8          sbit sn_red = P3^0;
+   9          sbit sn_yellow = P3^1;
+  10          sbit sn_green = P3^2;
+  11          sbit ew_green = P3^3;
+  12          sbit ew_yellow = P3^4;
+  13          sbit ew_red = P3^5;
+  14          sbit button_stop = P1^4;
+  15          sbit button_slow = P1^5;
+  16          
+  17          // 枚举定义
+  18          enum Direction {EW, SN};
+  19          enum Location {LEFT, RIGHT};
+  20          enum SnState {SN_RED, SN_GREEN, SN_YELLOW};  // 南北向状态
+  21          enum EwState {EW_GREEN, EW_YELLOW, EW_RED};  // 东西向状态
+  22          enum ButtonState {IDLE, STOP, SLOW};
+  23          
+  24          // 全局变量
+  25          bit stop_state = 0;
+  26          bit slow_state = 0;
+  27          int sn_units_place = 5;  // 南北向个位
+  28          int sn_tens_place = 2;   // 南北向十位
+  29          int ew_units_place = 0;  // 东西向个位
+  30          int ew_tens_place = 2;   // 东西向十位
+  31          unsigned char code disp[] = {0xc0, 0xf9, 0xa4, 0xb0, 0x99, 0x92, 0x82, 0xf8, 0x80, 0x90, 0x88};  // 段码表
+             -（0-9）
+  32          
+  33          // 全局状态变量
+  34          enum SnState current_sn_state;
+  35          enum EwState current_ew_state;
+  36          enum ButtonState current_button_state;
+  37          
+  38          // 函数声明
+  39          void state_init();
+  40          void Timer0_init();
+  41          void delay(int x);
+  42          void handle_digit_carry(int count, int *units_place, int *tens_place);  
+  43          void update_segment_disp(enum Direction dir, enum Location location, unsigned char Num);
+  44          bit is_stop_botton_pressed();
+  45          bit is_slow_botton_pressed();
+  46          void update_sn_state();
+  47          void update_ew_state();
+  48          void update_botton_state();
+  49          
+  50          // 状态初始化
+  51          void state_init() {
+  52   1          current_sn_state = SN_RED;      // 初始：南北红灯
+  53   1          current_ew_state = EW_GREEN;    // 初始：东西绿灯
+C51 COMPILER V9.54   MAIN                                                                  07/12/2025 17:26:44 PAGE 2   
+
+  54   1          current_button_state = IDLE;    // 按钮初始状态
+  55   1      }
+  56          
+  57          // 定时器0初始化（1ms中断）
+  58          void Timer0_init() {
+  59   1          TMOD &= 0xf0;
+  60   1          TMOD |= 0x01;  // 模式1：16位定时器
+  61   1          TL0 = 0x18;    // 初值装载（1ms@12MHz）
+  62   1          TH0 = 0xfc;
+  63   1          TF0 = 0;       // 清除标志
+  64   1          TR0 = 1;       // 启动定时器
+  65   1          ET0 = 1;       // 允许中断
+  66   1          EA = 1;        // 总中断允许
+  67   1          PT0 = 0;       // 低优先级
+  68   1      }
+  69          
+  70          // 延时函数
+  71          void delay(int x) {
+  72   1          while(x--);
+  73   1      }
+  74          
+  75          // 处理数字进位
+  76          void handle_digit_carry(int count, int *units_place, int *tens_place) {
+  77   1          if (count >= 1000) {  
+  78   2              *units_place -= 1;
+  79   2              if (*units_place < 0) {
+  80   3                  *units_place = 9;  // 个位归9
+  81   3                  *tens_place -= 1;  // 十位减1
+  82   3                  if (*tens_place < 0) {
+  83   4                      *tens_place = 0;  // 防止十位为负
+  84   4                  }
+  85   3              }
+  86   2          }
+  87   1      }
+  88          
+  89          // 更新数码管显示
+  90          void update_segment_disp(enum Direction dir, enum Location location, unsigned char Num) {
+  91   1          // 消隐（先关闭所有段选）
+  92   1          P0 = 0xff;
+  93   1          P2 = 0xff;
+  94   1      
+  95   1          switch(dir) {
+  96   2              case EW:  // 东西向数码管
+  97   2                  switch(location) {
+  98   3                      case LEFT:   // 十位
+  99   3                          P10 = 1;  
+ 100   3                          P11 = 0;
+ 101   3                          break;
+ 102   3                      case RIGHT:  // 个位
+ 103   3                          P10 = 0;
+ 104   3                          P11 = 1;  
+ 105   3                          break;
+ 106   3                  }
+ 107   2                  P2 = disp[Num];  // 段选输出
+ 108   2                  break;
+ 109   2              case SN:  // 南北向数码管
+ 110   2                  switch(location) {
+ 111   3                      case LEFT:   // 十位
+ 112   3                          P12 = 1; 
+ 113   3                          P13 = 0;
+ 114   3                          break;
+ 115   3                      case RIGHT:  // 个位
+C51 COMPILER V9.54   MAIN                                                                  07/12/2025 17:26:44 PAGE 3   
+
+ 116   3                          P12 = 0;
+ 117   3                          P13 = 1;  
+ 118   3                          break;
+ 119   3                  }
+ 120   2                  P0 = disp[Num];  // 段选输出
+ 121   2                  break;
+ 122   2          }
+ 123   1          delay(100);  // 短暂延时，增强显示稳定性
+ 124   1      }
+ 125          
+ 126          // 检测停止按钮按下
+ 127          bit is_button_stop_pressed() {
+ 128   1          if (button_stop == 0) {  // 检测到低电平
+ 129   2              delay(1000);    // 消抖（约10ms）
+ 130   2              if (button_stop == 0) {  // 确认按下
+ 131   3                  while(button_stop == 0);  // 等待释放
+ 132   3                  delay(1000);         // 释放消抖
+ 133   3                  return 1;
+ 134   3              }
+ 135   2          }
+ 136   1          return 0;
+ 137   1      }
+ 138          // 检测减速按钮按下
+ 139          bit is_button_slow_pressed() {
+ 140   1          if (button_slow == 0) {  // 检测到低电平
+ 141   2              delay(1000);    // 消抖（约10ms）
+ 142   2              if (button_slow == 0) {  // 确认按下
+ 143   3                  while(button_slow == 0);  // 等待释放
+ 144   3                  delay(1000);         // 释放消抖
+ 145   3                  return 1;
+ 146   3              }
+ 147   2          }
+ 148   1          return 0;
+ 149   1      }
+ 150          
+ 151          // 更新南北向红绿灯状态
+ 152          void update_sn_state() {
+ 153   1          // 状态切换逻辑：红灯→绿灯→黄灯→红灯...
+ 154   1          if (sn_tens_place == 0 && sn_units_place == 0) {  // 倒计时结束
+ 155   2              current_sn_state = (current_sn_state + 1) % 3;  // 循环切换
+ 156   2              // 根据新状态重置倒计时
+ 157   2              switch(current_sn_state) {
+ 158   3                  case SN_RED:    // 红灯时长：20秒（20→19...0）
+ 159   3                      sn_tens_place = 2;
+ 160   3                      sn_units_place = 0;
+ 161   3                      break;
+ 162   3                  case SN_GREEN:  // 绿灯时长：25秒（25→24...0）
+ 163   3                      sn_tens_place = 2;
+ 164   3                      sn_units_place = 5;
+ 165   3                      break;
+ 166   3                  case SN_YELLOW: // 黄灯时长：5秒（5→4...0）
+ 167   3                      sn_tens_place = 0;
+ 168   3                      sn_units_place = 5;
+ 169   3                      break;
+ 170   3              }
+ 171   2          }
+ 172   1          // 控制LED
+ 173   1          sn_red = (current_sn_state == SN_RED) ? 1 : 0;    
+ 174   1          sn_green = (current_sn_state == SN_GREEN) ? 1 : 0;
+ 175   1          sn_yellow = (current_sn_state == SN_YELLOW) ? 1 : 0;
+ 176   1      }
+ 177          
+C51 COMPILER V9.54   MAIN                                                                  07/12/2025 17:26:44 PAGE 4   
+
+ 178          // 更新东西向红绿灯状态
+ 179          void update_ew_state() {
+ 180   1          // 状态切换逻辑：绿灯→黄灯→红灯→绿灯...
+ 181   1          if (ew_tens_place == 0 && ew_units_place == 0) {  // 倒计时结束
+ 182   2              current_ew_state = (current_ew_state + 1) % 3;
+ 183   2              // 根据新状态重置倒计时
+ 184   2              switch(current_ew_state) {
+ 185   3                  case EW_GREEN:  // 绿灯时长：20秒
+ 186   3                      ew_tens_place = 2;
+ 187   3                      ew_units_place = 0;
+ 188   3                      break;
+ 189   3                  case EW_YELLOW: // 黄灯时长：5秒
+ 190   3                      ew_tens_place = 0;
+ 191   3                      ew_units_place = 5;
+ 192   3                      break;
+ 193   3                  case EW_RED:    // 红灯时长：25秒
+ 194   3                      ew_tens_place = 2;
+ 195   3                      ew_units_place = 5;
+ 196   3                      break;
+ 197   3              }
+ 198   2          }
+ 199   1          // 控制LED
+ 200   1          ew_red = (current_ew_state == EW_RED) ? 1 : 0;
+ 201   1          ew_green = (current_ew_state == EW_GREEN) ? 1 : 0;
+ 202   1          ew_yellow = (current_ew_state == EW_YELLOW) ? 1 : 0;
+ 203   1      }
+ 204          
+ 205          // 更新按钮状态
+ 206          void update_button_state() {
+ 207   1          switch(current_button_state) {
+ 208   2              case IDLE:
+ 209   2                  if (is_button_stop_pressed()) {
+ 210   3                      current_button_state = STOP;  // 按下停止键
+ 211   3                  } else if (is_button_slow_pressed()) {
+ 212   3                      current_button_state = SLOW;  // 按下慢速键
+ 213   3                  }
+ 214   2                  break;
+ 215   2              case STOP:
+ 216   2                  // 停止状态：全红灯，数码管显示0
+ 217   2                  sn_red = 1; sn_green = 0; sn_yellow = 0;
+ 218   2                  ew_red = 1; ew_green = 0; ew_yellow = 0;
+ 219   2                  update_segment_disp(EW, LEFT, 0);
+ 220   2                  update_segment_disp(EW, RIGHT, 0);
+ 221   2                  update_segment_disp(SN, LEFT, 0);
+ 222   2                  update_segment_disp(SN, RIGHT, 0);
+ 223   2                  if (is_button_stop_pressed()) {
+ 224   3                      current_button_state = IDLE;  // 再次按下恢复
+ 225   3                  }
+ 226   2                  break;
+ 227   2              case SLOW:
+ 228   2                  // 慢速状态：全黄灯，数码管显示0
+ 229   2                  sn_red = 0; sn_green = 0; sn_yellow = 1;
+ 230   2                  ew_red = 0; ew_green = 0; ew_yellow = 1;
+ 231   2                              update_segment_disp(EW, LEFT, 0);
+ 232   2                  update_segment_disp(EW, RIGHT, 0);
+ 233   2                  update_segment_disp(SN, LEFT, 0);
+ 234   2                  update_segment_disp(SN, RIGHT, 0);
+ 235   2                  if (is_button_slow_pressed()) {
+ 236   3                      current_button_state = IDLE;  // 再次按下恢复
+ 237   3                  }
+ 238   2                  break;
+ 239   2          }
+C51 COMPILER V9.54   MAIN                                                                  07/12/2025 17:26:44 PAGE 5   
+
+ 240   1      }
+ 241          
+ 242          // 主函数
+ 243          void main() {
+ 244   1          state_init();
+ 245   1          Timer0_init();
+ 246   1          while(1) {
+ 247   2              update_button_state();
+ 248   2              if (current_button_state == IDLE) {  // 正常运行
+ 249   3                  // 刷新数码管显示
+ 250   3                  update_segment_disp(EW, LEFT, ew_tens_place);   // 东西向十位
+ 251   3                  update_segment_disp(EW, RIGHT, ew_units_place); // 东西向个位
+ 252   3                  update_segment_disp(SN, LEFT, sn_tens_place);   // 南北向十位
+ 253   3                  update_segment_disp(SN, RIGHT, sn_units_place); // 南北向个位
+ 254   3                  // 更新红绿灯状态
+ 255   3                  update_sn_state();
+ 256   3                  update_ew_state();
+ 257   3              }
+ 258   2          }
+ 259   1      }
+ 260          
+ 261          // 定时器0中断服务函数（1ms触发一次）
+ 262          void Timer0_Routine() interrupt 1 {
+ 263   1          static int sn_count = 0, ew_count = 0;  
+ 264   1          TL0 = 0x18;  // 重装载初值
+ 265   1          TH0 = 0xfc;
+ 266   1      
+ 267   1          sn_count++;  // 南北向倒计时计数
+ 268   1          ew_count++;  // 东西向倒计时计数
+ 269   1      
+ 270   1          // 每1秒处理一次进位（1000ms）
+ 271   1          handle_digit_carry(sn_count, &sn_units_place, &sn_tens_place);
+ 272   1          handle_digit_carry(ew_count, &ew_units_place, &ew_tens_place);
+ 273   1      
+ 274   1          // 重置计数
+ 275   1          if (sn_count >= 1000) sn_count = 0;
+ 276   1          if (ew_count >= 1000) ew_count = 0;
+ 277   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    747    ----
+   CONSTANT SIZE    =     11    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     15       8
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

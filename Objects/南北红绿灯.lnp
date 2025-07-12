@@ -1,0 +1,3 @@
+".\Objects\main.obj" 
+TO ".\Objects\南北红绿灯" 
+PRINT(".\Listings\南北红绿灯.m51") RAMSIZE(256) 
